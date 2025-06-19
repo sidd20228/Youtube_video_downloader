@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>YouTube Video Downloader</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f5f5f5; display: flex; flex-direction: column; align-items: center; margin-top: 50px; }
+        .container { background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        input[type="text"] { width: 300px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 20px; background: #e62117; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #b31217; }
+        .message { margin-top: 20px; color: #e62117; }
+        select { margin-top: 10px; padding: 8px; border-radius: 4px; border: 1px solid #ccc; }
+        .warning { color: #b31217; font-size: 0.95em; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>YouTube Video Downloader</h2>
+        <input type="text" id="yt-link" placeholder="Paste YouTube video link here" />
+        <button onclick="getResolutions()">Get Resolutions</button>
+        <select id="resolution-select" style="display:none;"></select>
+        <div class="warning" id="audio-warning" style="display:none;"></div>
+        <button onclick="downloadVideo()" id="download-btn" style="display:none;">Download</button>
+        <div class="message" id="message"></div>
+    </div>
+    <script>
+        let formats = [];
+        function getResolutions() {
+            const url = document.getElementById('yt-link').value;
+            const message = document.getElementById('message');
+            const select = document.getElementById('resolution-select');
+            const downloadBtn = document.getElementById('download-btn');
+            const audioWarning = document.getElementById('audio-warning');
+            message.textContent = '';
+            select.style.display = 'none';
+            downloadBtn.style.display = 'none';
+            audioWarning.style.display = 'none';
+            if (!url) {
+                message.textContent = 'Please enter a YouTube link.';
+                return;
+            }
+            message.textContent = 'Fetching available resolutions...';
+            fetch('/formats', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) throw new Error(data.error);
+                formats = data.formats;
+                if (!formats.length) throw new Error('No downloadable formats found.');
+                select.innerHTML = '';
+                formats.forEach(f => {
+                    let label = `${f.resolution || ''} (${f.format || ''}${f.filesize ? ', ' + (f.filesize/1048576).toFixed(2) + ' MB' : ''})`;
+                    if (!f.has_audio) label += ' [Video Only]';
+                    let option = document.createElement('option');
+                    option.value = f.format_id;
+                    option.textContent = label;
+                    option.dataset.hasAudio = f.has_audio;
+                    select.appendChild(option);
+                });
+                select.style.display = 'inline-block';
+                downloadBtn.style.display = 'inline-block';
+                message.textContent = 'Select resolution and click Download.';
+                select.onchange = showAudioWarning;
+                showAudioWarning();
+            })
+            .catch(err => {
+                message.textContent = 'Error: ' + err.message;
+            });
+        }
+
+        function showAudioWarning() {
+            const select = document.getElementById('resolution-select');
+            const audioWarning = document.getElementById('audio-warning');
+            const selected = select.options[select.selectedIndex];
+            if (selected && selected.textContent.includes('[Video Only]')) {
+                audioWarning.textContent = 'Note: This is a video-only stream. The best available audio will be automatically merged.';
+                audioWarning.style.display = 'block';
+            } else {
+                audioWarning.textContent = '';
+                audioWarning.style.display = 'none';
+            }
+        }
+
+        function downloadVideo() {
+            const url = document.getElementById('yt-link').value;
+            const select = document.getElementById('resolution-select');
+            const format_id = select.value;
+            const message = document.getElementById('message');
+            message.textContent = '';
+            if (!url || !format_id) {
+                message.textContent = 'Please enter a YouTube link and select a resolution.';
+                return;
+            }
+            message.textContent = 'Downloading... Please wait.';
+            fetch('/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, format_id })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => { throw new Error(data.error || 'Download failed'); });
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                const a = document.createElement('a');
+                a.href = window.URL.createObjectURL(blob);
+                a.download = 'video.mp4';
+                a.click();
+                message.textContent = 'Download started!';
+            })
+            .catch(err => {
+                message.textContent = 'Error: ' + err.message;
+            });
+        }
+    </script>
+</body>
+</html> 
