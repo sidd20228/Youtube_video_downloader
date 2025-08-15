@@ -1,16 +1,13 @@
-from flask import Flask, request, send_file, jsonify, after_this_request
+import streamlit as st
 import yt_dlp
 import os
 import uuid
 
-app = Flask(__name__)
+st.title("YouTube Video Downloader")
 
-@app.route('/formats', methods=['POST'])
-def get_formats():
-    data = request.json
-    url = data.get('url')
-    if not url:
-        return jsonify({'error': 'No URL provided'}), 400
+url = st.text_input("Enter YouTube URL:")
+
+def get_formats(url):
     try:
         with yt_dlp.YoutubeDL({'quiet': True}) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -18,56 +15,45 @@ def get_formats():
             for f in info.get('formats', []):
                 if f.get('vcodec', 'none') != 'none' and f.get('ext') == 'mp4':
                     has_audio = f.get('acodec', 'none') != 'none'
+                    label = f"{f.get('format_note') or f.get('height', '')}p | {f.get('format')} | {'Audio' if has_audio else 'No Audio'}"
                     formats.append({
                         'format_id': f['format_id'],
-                        'resolution': f.get('format_note') or f.get('height', ''),
-                        'filesize': f.get('filesize') or f.get('filesize_approx'),
-                        'format': f.get('format'),
+                        'label': label,
                         'has_audio': has_audio
                     })
-        return jsonify({'formats': formats})
+            return formats
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        st.error(f"Error: {e}")
+        return []
 
-@app.route('/download', methods=['POST'])
-def download_video():
-    data = request.json
-    url = data.get('url')
-    format_id = data.get('format_id')
-    if not url:
-        return jsonify({'error': 'No URL provided'}), 400
-
-    video_id = str(uuid.uuid4())
-    output_path = f"{video_id}.mp4"
-
-    # Always merge selected video with best audio
-    if format_id:
-        ydl_format = f"{format_id}+bestaudio[ext=m4a]/best"
-    else:
-        ydl_format = 'bestvideo+bestaudio/best'
-
-    ydl_opts = {
-        'format': ydl_format,
-        'outtmpl': output_path,
-        'quiet': True,
-        'merge_output_format': 'mp4',
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-
-        @after_this_request
-        def remove_file(response):
+if url:
+    formats = get_formats(url)
+    if formats:
+        format_labels = [f["label"] for f in formats]
+        selected = st.selectbox("Select format:", format_labels)
+        selected_format = formats[format_labels.index(selected)]
+        if st.button("Download"):
+            video_id = str(uuid.uuid4())
+            output_path = f"{video_id}.mp4"
+            ydl_format = f"{selected_format['format_id']}+bestaudio[ext=m4a]/best"
+            ydl_opts = {
+                'format': ydl_format,
+                'outtmpl': output_path,
+                'quiet': True,
+                'merge_output_format': 'mp4',
+            }
             try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+                with open(output_path, "rb") as f:
+                    st.download_button(
+                        label="Click to Download MP4",
+                        data=f,
+                        file_name="video.mp4",
+                        mime="video/mp4"
+                    )
                 os.remove(output_path)
             except Exception as e:
-                print(f"Error deleting file: {e}")
-            return response
-
-        return send_file(output_path, as_attachment=True)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-if __name__ == '__main__':
-    app.run(debug=True) 
+                st.error(f"Download failed: {e}")
+    else:
+        st.info("No downloadable formats found or invalid URL.")
